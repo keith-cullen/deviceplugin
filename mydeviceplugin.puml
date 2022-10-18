@@ -1,0 +1,40 @@
+@startuml
+box "mydeviceplugin"
+  participant Main
+  participant Scan
+  participant server.Serve
+  participant grpc.Serve
+end box
+box kubelet
+  participant kubelet
+end box
+
+Main -> Main: dp := newMyDevicePlugin()
+Main -> Main: manager := deviceplugin.NewManager("mydeviceplugin.net", dp)
+Main -> Main: manager.Run()
+Main -->> Scan: <<create>>
+==Add==
+Scan -> Scan: notifier = deviceplugin.newNotifier()
+group dp.Scan(notifier)
+  Scan -> Scan: notifier.Notify()
+end
+Scan ->> Main: updatesCh <- map["mydevice"]["0"]DeviceInfo
+group manager.handleUpdate()
+  Main -> Main: manager.servers["mydevice"] = deviceplugin.newServer("mydevice", dp.PostAllocate)
+  Main -> Main: srv := manager.servers["mydevice"]
+  Main -> Main: srv.Update(map["0"]DeviceInfo)
+end
+Main -->> server.Serve: <<create>>
+group srv.Serve("mydeviceplugin.net")
+  server.Serve -> server.Serve: lis := net.Listen("/var/lib/kubelet/device-plugins/mydeviceplugin.net-mydevice.sock")
+  server.Serve -> server.Serve: srv.grpcServer = grpc.NewServer()
+  server.Serve -> server.Serve: pluginapi.RegisterDevicePluginServer(srv.grpcServer)
+  server.Serve --> kubelet: pluginapi.NewRegistrationClient().Register()
+end
+server.Serve -->> grpc.Serve: <<create>>
+Main ->> grpc.Serve: map["0"]DeviceInfo -> srv.updatesCh
+group srv.grpcServer.Serve(lis)
+  kubelet -> grpc.Serve: ListAndWatch
+  grpc.Serve -->> kubelet: map["0"]DeviceInfo
+end
+@enduml
